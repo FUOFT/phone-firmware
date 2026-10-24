@@ -1,1 +1,356 @@
+import customtkinter as ctk
+import subprocess
+import os
+import urllib.request
+from io import BytesIO
+from PIL import Image
 
+FONT_MAIN = "Segoe UI"
+
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
+
+class PhoneManagerApp(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+
+        self.title("FUOFT Manager")
+        self.geometry("950x650")
+        self.resizable(False, False)
+        self.overrideredirect(True)
+        
+        self.configure(fg_color="#000000")
+        self.wm_attributes("-transparentcolor", "#000000") 
+        
+        self.adb_path = r"C:\Users\user\Desktop\pro\fastphone"
+        self.script_dir = os.path.dirname(os.path.abspath(__file__))
+
+        self.img_links = {
+            "oneplus": "https://redmishop.ru/wp-content/uploads/2026/02/oneplus_16.webp",
+            "samsung": "https://avatars.mds.yandex.net/get-mpic/19823040/2a0000019e701e26951a032b41847ed889b7/orig",
+            "realme": "https://avatars.mds.yandex.net/get-mpic/18274777/2a00000198c1b901e6f354cd0f040f5514cc/orig",
+            "unknown": "https://img.magnific.com/premium-psd/3d-render-shiny-blue-question-mark_971166-164515.jpg"
+        }
+
+        self.bg_image = None
+        for ext in ["Fon.jpg", "Fon.avif"]:
+            path = os.path.join(self.script_dir, ext)
+            if os.path.exists(path):
+                try:
+                    self.bg_image = ctk.CTkImage(light_image=Image.open(path), dark_image=Image.open(path), size=(950, 650))
+                    break
+                except Exception:
+                    pass
+
+        self.main_frame = ctk.CTkFrame(self, corner_radius=25, fg_color="#1a1a1a")
+        self.main_frame.pack(fill="both", expand=True, padx=3, pady=3)
+
+        if self.bg_image:
+            self.bg_label = ctk.CTkLabel(self.main_frame, text="", image=self.bg_image)
+            self.bg_label.place(relwidth=1, relheight=1)
+
+        self.main_frame.grid_rowconfigure(0, weight=1) 
+        self.main_frame.grid_rowconfigure(1, weight=0) 
+        self.main_frame.grid_columnconfigure(0, weight=1)
+
+        self.drag_bar = ctk.CTkFrame(self.main_frame, height=40, fg_color="transparent")
+        self.drag_bar.grid(row=0, column=0, sticky="new")
+        self.drag_bar.bind("<Button-1>", self.start_move)
+        self.drag_bar.bind("<B1-Motion>", self.do_move)
+        
+        self.close_btn = ctk.CTkButton(self.drag_bar, text="✕", width=35, height=35, corner_radius=15, 
+                                       fg_color="#ff4d4d", hover_color="#cc0000", font=(FONT_MAIN, 16, "bold"), command=self.destroy)
+        self.close_btn.pack(side="right", pady=5, padx=5)
+
+        self.content_area = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.content_area.grid(row=0, column=0, sticky="nsew", pady=(50, 0))
+
+        self.bottom_bar = ctk.CTkFrame(self.main_frame, height=90, corner_radius=30, fg_color="#202020", border_width=1, border_color="#444444")
+        self.bottom_bar.grid(row=1, column=0, sticky="ew", padx=30, pady=20)
+        self.bottom_bar.pack_propagate(False)
+
+        ctk.CTkLabel(self.bottom_bar, text="FUOFT BILD", font=(FONT_MAIN, 20, "bold"), text_color="#aaaaaa").pack(side="left", padx=30)
+
+        self.buttons_frame = ctk.CTkFrame(self.bottom_bar, fg_color="transparent")
+        self.buttons_frame.pack(side="right", padx=20, fill="y")
+
+        self.menu_items = [
+            ("Fastboot", self.show_fastboot_screen),
+            ("Recovery", self.show_recovery_screen),
+            ("О устройстве", self.show_info_screen),
+            ("Перезагрузка", lambda: self.run_command("adb reboot")),
+            ("Выключить", self.confirm_power_off)
+        ]
+
+        self.buttons = []
+        for text, cmd in self.menu_items:
+            btn = ctk.CTkButton(self.buttons_frame, text=text, font=(FONT_MAIN, 15, "bold"), 
+                                fg_color="transparent", text_color="#aaaaaa", hover_color="#333333", 
+                                width=110, height=45, corner_radius=15, command=lambda c=cmd, b=text: self.on_btn_click(c, b))
+            btn.pack(side="left", padx=5, pady=15)
+            self.buttons.append(btn)
+
+        self.show_main_screen()
+
+    def start_move(self, event):
+        self.x = event.x
+        self.y = event.y
+
+    def do_move(self, event):
+        x = self.winfo_x() + (event.x - self.x)
+        y = self.winfo_y() + (event.y - self.y)
+        self.geometry(f"+{x}+{y}")
+
+    def reset_buttons(self):
+        for btn in self.buttons:
+            btn.configure(fg_color="transparent", text_color="#aaaaaa")
+
+    def highlight_button(self, text):
+        self.reset_buttons()
+        for btn in self.buttons:
+            if btn.cget("text") == text:
+                btn.configure(fg_color="#3498db", text_color="white")
+
+    def on_btn_click(self, command, button_text):
+        if button_text in ["Fastboot", "Recovery", "О устройстве"]:
+            self.highlight_button(button_text)
+        else:
+            self.reset_buttons()
+        
+        if callable(command):
+            command()
+
+    def clear_content(self):
+        for widget in self.content_area.winfo_children():
+            widget.destroy()
+
+    def show_main_screen(self):
+        self.clear_content()
+        self.reset_buttons()
+        
+        ctk.CTkLabel(self.content_area, text="Управление Android", font=(FONT_MAIN, 50, "bold"), text_color="white").pack(pady=(60, 10))
+        
+        self.device_label = ctk.CTkLabel(self.content_area, text="Поиск устройства...", font=(FONT_MAIN, 18, "bold"), text_color="gray")
+        self.device_label.pack(pady=10)
+        
+        ctk.CTkButton(self.content_area, text="Обновить статус", width=150, height=30, font=(FONT_MAIN, 12), command=self.check_device).pack(pady=5)
+        
+        self.check_device()
+        self.auto_update()
+
+    def auto_update(self):
+        if hasattr(self, 'device_label') and self.device_label.winfo_exists():
+            self.check_device()
+            self.after(2000, self.auto_update)
+
+    def show_info_screen(self):
+        self.clear_content()
+        
+        info_frame = ctk.CTkFrame(self.content_area, fg_color="transparent")
+        info_frame.pack(fill="both", expand=True, padx=30, pady=10)
+
+        self.left_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
+        self.left_frame.pack(side="left", fill="both", expand=True, padx=10)
+
+        ctk.CTkLabel(self.left_frame, text="Информация об устройстве", font=(FONT_MAIN, 28, "bold"), text_color="white").pack(anchor="w", pady=(0, 10))
+        
+        self.specs_container = ctk.CTkFrame(self.left_frame, fg_color="transparent")
+        self.specs_container.pack(fill="x", pady=10)
+        
+        self.render_specs([("Статус", "Нажмите 'Сканировать' для получения данных")], color="gray")
+
+        ctk.CTkButton(self.left_frame, text="СКАНИРОВАТЬ УСТРОЙСТВО", font=(FONT_MAIN, 16, "bold"), height=45, fg_color="#2ecc71", hover_color="#27ae60", command=self.scan_device).pack(pady=20, fill="x", padx=20)
+
+        self.right_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
+        self.right_frame.pack(side="right", fill="both", expand=True, padx=10)
+
+        self.image_label = ctk.CTkLabel(self.right_frame, text="")
+        self.image_label.pack(pady=10, expand=True)
+        self.update_image("unknown")
+        
+        ctk.CTkButton(self.content_area, text="Назад", font=(FONT_MAIN, 16), height=40, width=150, fg_color="gray", command=self.show_main_screen).pack(pady=5)
+
+    def render_specs(self, specs, color="white"):
+        for widget in self.specs_container.winfo_children():
+            widget.destroy()
+            
+        for title, value in specs:
+            row = ctk.CTkFrame(self.specs_container, fg_color="transparent")
+            row.pack(fill="x", pady=5)
+            ctk.CTkLabel(row, text=f"{title}:", font=(FONT_MAIN, 16, "bold"), text_color="#888888", width=130, anchor="w").pack(side="left")
+            ctk.CTkLabel(row, text=value, font=(FONT_MAIN, 16, "bold" if color == "white" else "normal"), text_color=color, anchor="w").pack(side="left", padx=10)
+
+    def update_image(self, brand):
+        local_path = os.path.join(self.script_dir, f"{brand}.png")
+        img = None
+        
+        if os.path.exists(local_path):
+            try:
+                img = Image.open(local_path).convert("RGBA")
+            except:
+                pass
+        
+        if not img:
+            url = self.img_links.get(brand, self.img_links["unknown"])
+            img = self.load_image_from_url(url)
+
+        if img:
+            w, h = img.size
+            if w > 0:
+                target_w = 450
+                target_h = int((h / w) * target_w)
+                self.phone_img = ctk.CTkImage(light_image=img, dark_image=img, size=(target_w, target_h))
+                self.image_label.configure(image=self.phone_img)
+
+    def load_image_from_url(self, url):
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req) as response:
+                img_data = response.read()
+            img = Image.open(BytesIO(img_data)).convert("RGBA")
+            
+            datas = img.getdata()
+            new_data = []
+            for item in datas:
+                if item[0] > 230 and item[1] > 230 and item[2] > 230:
+                    new_data.append((255, 255, 255, 0))
+                else:
+                    new_data.append(item)
+            img.putdata(new_data)
+            return img
+        except Exception as e:
+            print(f"Ошибка загрузки картинки {url}: {e}")
+            return None
+
+    def scan_device(self):
+        try:
+            os.chdir(self.adb_path)
+            
+            check = subprocess.run("adb devices", shell=True, capture_output=True, text=True)
+            if "device" not in check.stdout or "unauthorized" in check.stdout:
+                self.render_specs([("Ошибка", "Телефон не подключен")], color="#FF0000")
+                return
+
+            model_code = subprocess.run("adb shell getprop ro.product.model", shell=True, capture_output=True, text=True).stdout.strip()
+            brand = subprocess.run("adb shell getprop ro.product.brand", shell=True, capture_output=True, text=True).stdout.strip().lower()
+            plat = subprocess.run("adb shell getprop ro.board.platform", shell=True, capture_output=True, text=True).stdout.strip().lower()
+            soc_man = subprocess.run("adb shell getprop ro.soc.manufacturer", shell=True, capture_output=True, text=True).stdout.strip().lower()
+            soc_model = subprocess.run("adb shell getprop ro.soc.model", shell=True, capture_output=True, text=True).stdout.strip()
+
+            detected_brand = "unknown"
+            if "oneplus" in brand or model_code.startswith("CPH") or model_code.startswith("AC"):
+                detected_brand = "oneplus"
+            elif "samsung" in brand or model_code.startswith("SM-"):
+                detected_brand = "samsung"
+            elif "realme" in brand or model_code.startswith("RMX"):
+                detected_brand = "realme"
+
+            self.update_image(detected_brand)
+
+            # --- ПОЛНОЕ ОПРЕДЕЛЕНИЕ ПРОЦЕССОРА ---
+            cpu_name = "Неизвестно"
+            
+            # Сначала пробуем через новые свойства Android (ro.soc.model)
+            if soc_model:
+                cpu_name = soc_model
+            # Если пусто, идем по кодовым именам
+            elif "pineapple" in plat or "sm8650" in plat:
+                cpu_name = "Snapdragon 8 Gen 3"
+            elif "kalama" in plat or "sm8550" in plat:
+                cpu_name = "Snapdragon 8 Gen 2"
+            elif "taro" in plat or "sm8450" in plat:
+                cpu_name = "Snapdragon 8 Gen 1"
+            elif "mt6789" in plat or "mt6789" in soc_model.lower():
+                cpu_name = "MediaTek Helio G99"
+            elif "mt6833" in plat:
+                cpu_name = "MediaTek Dimensity 700"
+            elif "mt6877" in plat:
+                cpu_name = "MediaTek Dimensity 900"
+            elif "mt6893" in plat:
+                cpu_name = "MediaTek Dimensity 1200"
+            elif plat:
+                cpu_name = plat.capitalize()
+
+            model_name = model_code
+            os_name = "Android " + subprocess.run("adb shell getprop ro.build.version.release", shell=True, capture_output=True, text=True).stdout.strip()
+
+            mem_info = subprocess.run("adb shell cat /proc/meminfo", shell=True, capture_output=True, text=True).stdout
+            ram = "Неизвестно"
+            if "MemTotal" in mem_info:
+                mem_kb = int(mem_info.split("MemTotal:")[1].split("kB")[0].strip())
+                ram = f"{round(mem_kb / 1024 / 1024, 1)} ГБ"
+
+            specs = [
+                ("Модель", model_name),
+                ("Процессор", cpu_name),
+                ("Система", os_name),
+                ("ОЗУ", ram),
+                ("Кодовое имя", model_code)
+            ]
+            self.render_specs(specs, color="white")
+
+        except Exception as e:
+            self.render_specs([("Ошибка", str(e))], color="#FF0000")
+
+    def show_fastboot_screen(self):
+        self.clear_content()
+        ctk.CTkLabel(self.content_area, text="Fastboot Меню", font=(FONT_MAIN, 40, "bold"), text_color="white").pack(pady=(40, 20))
+        btn_frame = ctk.CTkFrame(self.content_area, fg_color="transparent")
+        btn_frame.pack()
+        ctk.CTkButton(btn_frame, text="Перезагрузить в Fastboot", font=(FONT_MAIN, 16), height=50, width=250, command=lambda: self.run_command("adb reboot bootloader")).pack(pady=10)
+        ctk.CTkButton(btn_frame, text="Проверить устройство", font=(FONT_MAIN, 16), height=50, width=250, command=lambda: self.run_command("fastboot devices")).pack(pady=10)
+        ctk.CTkButton(btn_frame, text="Установить TWRP", font=(FONT_MAIN, 16), height=50, width=250, command=self.install_twrp).pack(pady=10)
+        ctk.CTkButton(btn_frame, text="Назад", font=(FONT_MAIN, 16), height=40, width=250, fg_color="gray", command=self.show_main_screen).pack(pady=20)
+
+    def show_recovery_screen(self):
+        self.clear_content()
+        ctk.CTkLabel(self.content_area, text="Recovery Меню", font=(FONT_MAIN, 40, "bold"), text_color="white").pack(pady=(40, 20))
+        btn_frame = ctk.CTkFrame(self.content_area, fg_color="transparent")
+        btn_frame.pack()
+        ctk.CTkButton(btn_frame, text="Перезагрузить в Recovery", font=(FONT_MAIN, 16), height=50, width=250, command=lambda: self.run_command("adb reboot recovery")).pack(pady=10)
+        ctk.CTkButton(btn_frame, text="Назад", font=(FONT_MAIN, 16), height=40, width=250, fg_color="gray", command=self.show_main_screen).pack(pady=20)
+
+    def run_command(self, command):
+        try:
+            os.chdir(self.adb_path)
+            subprocess.run(command, shell=True, capture_output=True, text=True)
+            self.check_device()
+        except Exception as e:
+            print(f"Ошибка: {e}")
+
+    def check_device(self):
+        try:
+            os.chdir(self.adb_path)
+            result = subprocess.run("adb devices", shell=True, capture_output=True, text=True)
+            lines = result.stdout.strip().split('\n')
+            connected_device = None
+            if len(lines) > 1:
+                for line in lines[1:]:
+                    if "device" in line and "unauthorized" not in line:
+                        connected_device = line.split()[0]
+                        break
+            
+            if connected_device:
+                self.device_label.configure(text=f"Подключено: {connected_device}", text_color="#00FF00")
+            elif "unauthorized" in result.stdout:
+                self.device_label.configure(text="На телефоне нажми 'Разрешить отладку'", text_color="#FFA500")
+            else:
+                self.device_label.configure(text="Устройство не найдено", text_color="#FF0000")
+        except Exception as e:
+            self.device_label.configure(text=f"Ошибка ADB (проверь путь)", text_color="#FF0000")
+
+    def install_twrp(self):
+        dialog = ctk.CTkInputDialog(text="Введите название файла TWRP:", title="Прошивка TWRP")
+        filename = dialog.get_input()
+        if filename:
+            self.run_command(f"fastboot flash recovery {filename}")
+
+    def confirm_power_off(self):
+        dialog = ctk.CTkInputDialog(text="Выключить телефон? (y/n)", title="Выключение")
+        answer = dialog.get_input()
+        if answer and answer.lower() == 'y':
+            self.run_command("adb shell reboot -p")
+
+if __name__ == "__main__":
+    app = PhoneManagerApp()
+    app.mainloop()
